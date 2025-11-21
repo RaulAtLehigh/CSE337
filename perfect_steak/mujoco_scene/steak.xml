@@ -8,14 +8,15 @@
 
   <asset>
     <texture type="skybox" builtin="gradient" rgb1="0.8 0.8 0.85" rgb2="0.4 0.45 0.5" width="256" height="256"/>
-    <texture type="2d" name="pan_tex" builtin="flat" width="256" height="256" rgb1="0.75 0.76 0.78" mark="cross" markrgb="0.65 0.66 0.68"/>
+    <texture type="2d" name="pan_tex" builtin="flat" width="256" height="256" rgb1="0.78 0.79 0.82" mark="edge" markrgb="0.55 0.56 0.6"/>
     <texture type="2d" name="steak_tex" builtin="flat" width="256" height="256" rgb1="0.82 0.36 0.36" mark="none"/>
-    <material name="pan_mat" texture="pan_tex" specular="0.8" shininess="0.6" reflectance="0.2"/>
+    <material name="pan_mat" texture="pan_tex" specular="1.2" shininess="1.2" reflectance="0.35"/>
     <material name="steak_mat" texture="steak_tex" specular="0.05" shininess="0.05"/>
   </asset>
 
   <worldbody>
-    <light name="overhead_light" pos="0 0 0.6" dir="0 0 -1" diffuse="0.9 0.9 0.9" specular="0.4 0.4 0.4" cutoff="100" exponent="5"/>
+    <light name="overhead_light" pos="0 0 0.6" dir="0 0 -1" diffuse="0.9 0.9 0.9" specular="0.6 0.6 0.6" cutoff="100" exponent="5"/>
+    <light name="rim_light" pos="-0.4 0.4 0.35" dir="0 0 -1" diffuse="0.4 0.4 0.45" specular="0.9 0.9 0.95" cutoff="80" exponent="10"/>
     <geom name="table" type="plane" size="1 1 0.02" pos="0 0 -0.02" rgba="0.4 0.4 0.4 1"/>
 
     <body name="pan" pos="0 0 0.0">
@@ -28,8 +29,12 @@
     </body>
 
     <body name="steak" pos="0 0 0.035">
+      <joint name="steak_slide" type="slide" axis="0 0 1" damping="2"/>
+      <joint name="steak_yaw" type="hinge" axis="0 0 1" damping="0.2"/>
       <!-- thickness approximates 1.25in (0.03175 m) -->
-      <geom name="steak_core" type="box" size="0.12 0.08 0.015875" material="steak_mat" rgba="0.82 0.36 0.36 1"/>
+      <geom name="steak_core" type="box" size="0.12 0.08 0.015875" rgba="0 0 0 0"/>
+      <geom name="steak_bottom" type="box" size="0.12 0.08 0.0079375" pos="0 0 -0.0079375" material="steak_mat" rgba="0.86 0.52 0.5 1"/>
+      <geom name="steak_top" type="box" size="0.12 0.08 0.0079375" pos="0 0 0.0079375" material="steak_mat" rgba="0.86 0.52 0.5 1"/>
       <site name="steak_indicator" pos="0 0 0.02" size="0.001"/>
     </body>
   </worldbody>

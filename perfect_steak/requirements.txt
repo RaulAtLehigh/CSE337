@@ -1,5 +1,6 @@
 numpy>=1.26
 torch>=2.0
+matplotlib>=3.8
 # Visualization extras (uncomment if you want MuJoCo support):
-# mujoco>=3.1
-# mujoco-python-viewer>=0.3
+mujoco>=3.1
+mujoco-python-viewer>=0.3
