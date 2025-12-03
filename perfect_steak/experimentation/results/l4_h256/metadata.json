@@ -1,0 +1,16 @@
+{
+  "experiment_id": "l4_h256",
+  "seed": 2025,
+  "hidden_layer_sizes": [
+    256,
+    256,
+    256,
+    256
+  ],
+  "best_eval_score": 2.5578355805217257,
+  "best_eval_episode": 3750,
+  "time_to_optimal_episode": null,
+  "total_training_seconds": 652.6049191951752,
+  "num_episodes": 5000,
+  "notes": "Four hidden layers (all 256 units)."
+}

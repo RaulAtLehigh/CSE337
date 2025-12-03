@@ -1,0 +1,13 @@
+{
+  "experiment_id": "l1_h64",
+  "seed": 2025,
+  "hidden_layer_sizes": [
+    64
+  ],
+  "best_eval_score": -0.22594342549352397,
+  "best_eval_episode": 750,
+  "time_to_optimal_episode": null,
+  "total_training_seconds": 259.38542199134827,
+  "num_episodes": 5000,
+  "notes": "Single hidden layer baseline (64 units)."
+}

@@ -9,9 +9,9 @@
   <asset>
     <texture type="skybox" builtin="gradient" rgb1="0.8 0.8 0.85" rgb2="0.4 0.45 0.5" width="256" height="256"/>
     <texture type="2d" name="pan_tex" builtin="flat" width="256" height="256" rgb1="0.78 0.79 0.82" mark="edge" markrgb="0.55 0.56 0.6"/>
-    <texture type="2d" name="steak_tex" builtin="flat" width="256" height="256" rgb1="0.82 0.36 0.36" mark="none"/>
     <material name="pan_mat" texture="pan_tex" specular="1.2" shininess="1.2" reflectance="0.35"/>
-    <material name="steak_mat" texture="steak_tex" specular="0.05" shininess="0.05"/>
+    <!-- Neutral material so geom RGBA directly reflects browning palette -->
+    <material name="steak_mat" specular="0.05" shininess="0.05" rgba="1 1 1 1"/>
   </asset>
 
   <worldbody>

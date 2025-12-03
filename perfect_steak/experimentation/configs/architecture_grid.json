@@ -1,0 +1,115 @@
+[
+  {
+    "id": "l1_h64",
+    "hidden_layer_sizes": [64],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Single hidden layer baseline (64 units)."
+  },
+  {
+    "id": "l1_h128",
+    "hidden_layer_sizes": [128],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Single hidden layer (128 units)."
+  },
+  {
+    "id": "l1_h256",
+    "hidden_layer_sizes": [256],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Single hidden layer (256 units)."
+  },
+  {
+    "id": "l1_h512",
+    "hidden_layer_sizes": [512],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Single hidden layer (256 units)."
+  },
+  {
+    "id": "l2_h64",
+    "hidden_layer_sizes": [64, 64],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Two hidden layers (64 units each)."
+  },
+  {
+    "id": "l2_h128",
+    "hidden_layer_sizes": [128, 128],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Two hidden layers (128 units each)."
+  },
+  {
+    "id": "l2_h256",
+    "hidden_layer_sizes": [256, 256],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Two hidden layers (256 units each)."
+  },
+  {
+    "id": "l2_h512",
+    "hidden_layer_sizes": [512, 512],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Two hidden layers (256 units each)."
+  },
+  {
+    "id": "l3_h64",
+    "hidden_layer_sizes": [64, 64, 64],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Three hidden layers (all 64 units)."
+  },
+  {
+    "id": "l3_h128",
+    "hidden_layer_sizes": [128, 128, 128],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Three hidden layers (all 128 units)."
+  },
+  {
+    "id": "l3_h256",
+    "hidden_layer_sizes": [256, 256, 256],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Three hidden layers (all 256 units)."
+  },
+  {
+    "id": "l3_h512",
+    "hidden_layer_sizes": [512, 512, 512],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Three hidden layers (all 256 units)."
+  },
+
+  {
+    "id": "l4_h64",
+    "hidden_layer_sizes": [64, 64, 64, 64],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Four hidden layers (all 128 units)."
+  },
+  {
+    "id": "l4_h128",
+    "hidden_layer_sizes": [128, 128, 128, 128],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Four hidden layers (all 128 units)."
+  },
+  {
+    "id": "l4_h256",
+    "hidden_layer_sizes": [256, 256, 256, 256],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Four hidden layers (all 256 units)."
+  },
+  {
+    "id": "l4_h512",
+    "hidden_layer_sizes": [512, 512, 512, 512],
+    "seed": 2025,
+    "num_episodes": 5000,
+    "notes": "Four hidden layers (all 512 units)."
+  }
+]

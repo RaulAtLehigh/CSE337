@@ -1,0 +1,14 @@
+{
+  "experiment_id": "l2_h64",
+  "seed": 2025,
+  "hidden_layer_sizes": [
+    64,
+    64
+  ],
+  "best_eval_score": 1.4393648222810804,
+  "best_eval_episode": 4750,
+  "time_to_optimal_episode": null,
+  "total_training_seconds": 264.02609300613403,
+  "num_episodes": 5000,
+  "notes": "Two hidden layers (64 units each)."
+}

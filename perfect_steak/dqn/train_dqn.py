@@ -9,24 +9,22 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 from perfect_steak.steak_env import SteakEnv
 
 # -----------------------------------------------------------------------------
-# Environment setup (mirrors the Lab 6 MountainCar example structure)
+# Environment setup
 # -----------------------------------------------------------------------------
 env = SteakEnv()
 
-# Determine action/observation dimensions, falling back when Gymnasium spaces
-# are not registered (e.g., if gymnasium is not installed).
 if getattr(env, "action_space", None) is not None:
-    n_actions = env.action_space.n  # type: ignore[assignment, union-attr]
+    n_actions = env.action_space.n  # type: ignore
 else:
     n_actions = len(env.ACTIONS)
 
+# Reset to get correct state_dim (now 6 instead of 7)
 obs_reset, _ = env.reset()
 if getattr(env, "observation_space", None) is not None:
-    state_dim = env.observation_space.shape[0]  # type: ignore[union-attr]
+    state_dim = env.observation_space.shape[0]  # type: ignore
 else:
     state_dim = len(obs_reset)
 
@@ -34,14 +32,14 @@ else:
 # Hyperparameters
 # -----------------------------------------------------------------------------
 gamma = 0.99
-alpha = 1e-3
+alpha = 1e-4  # Slight increase back to 1e-4 since episodes are shorter/cleaner
 epsilon = 1.0
 epsilon_min = 0.02
-epsilon_decay = 0.999
-num_episodes = 10000
+epsilon_decay = 0.999  # Slower decay to ensure exploration in new state space
+num_episodes = 5000 
 batch_size = 128
 replay_buffer_size = 50_000
-target_update_freq = 100  # episodes
+target_update_freq = 500  # More frequent updates due to shorter episodes
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -50,8 +48,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Function approximator
 # -----------------------------------------------------------------------------
 class QNetwork(nn.Module):
-    """Small MLP that returns Q-values for each action."""
-
     def __init__(self) -> None:
         super().__init__()
         self.layers = nn.Sequential(
@@ -74,15 +70,13 @@ q_net_target.load_state_dict(q_net.state_dict())
 q_net_target.eval()
 
 optimizer = optim.Adam(q_net.parameters(), lr=alpha)
-loss_fn = nn.MSELoss()
+loss_fn = nn.SmoothL1Loss()
 
 
 # -----------------------------------------------------------------------------
 # Replay buffer
 # -----------------------------------------------------------------------------
 class ReplayBuffer:
-    """Cyclic buffer storing (s, a, r, s', done)."""
-
     def __init__(self, capacity: int) -> None:
         self.buffer: Deque[Tuple[np.ndarray, int, float, np.ndarray, float]] = deque(
             maxlen=capacity
@@ -123,7 +117,6 @@ eval_env = SteakEnv()
 # Helper functions
 # -----------------------------------------------------------------------------
 def epsilon_greedy(state: np.ndarray, eps: float) -> int:
-    """Epsilon-greedy policy using the online network."""
     if random.random() < eps:
         return random.randrange(n_actions)
     state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
@@ -132,7 +125,6 @@ def epsilon_greedy(state: np.ndarray, eps: float) -> int:
 
 
 def train_step() -> None:
-    """Sample from replay buffer and update the online network."""
     if len(replay_buffer) < batch_size:
         return
 
@@ -159,18 +151,16 @@ def train_step() -> None:
 
 
 def update_target_network() -> None:
-    """Copy weights from the online network to the target network."""
     q_net_target.load_state_dict(q_net.state_dict())
     q_net_target.eval()
 
 
 def evaluate_policy(episodes: int = 5) -> float:
-    """Greedy evaluation without exploration to track progress."""
     scores = []
     for _ in range(episodes):
         state, _ = eval_env.reset()
         done = False
-        total_reward = 0.0
+        episode_reward = 0.0
         while not done:
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
             with torch.no_grad():
@@ -178,20 +168,18 @@ def evaluate_policy(episodes: int = 5) -> float:
             next_state, reward, terminated, truncated, _ = eval_env.step(action)
             done = terminated or truncated
             state = next_state
-            total_reward += reward
-        scores.append(total_reward)
+            episode_reward += reward
+        scores.append(episode_reward)
     return float(np.mean(scores))
 
 
 # -----------------------------------------------------------------------------
-# Training loop (episode-based, matching lab flow)
+# Training loop
 # -----------------------------------------------------------------------------
 episode_returns: list[float] = []
+total_steps = 0
 
 for episode in range(num_episodes):
-    if episode % target_update_freq == 0:
-        update_target_network()
-
     state, _ = env.reset()
     done = False
     total_reward = 0.0
@@ -203,9 +191,14 @@ for episode in range(num_episodes):
         done = terminated or truncated
         if done:
             last_info = info
-        clipped_reward = float(np.clip(reward, -3.0, 3.0))
+        
+        clipped_reward = float(np.clip(reward, -5.0, 5.0))
         replay_buffer.append(state, action, clipped_reward, next_state, done)
         train_step()
+
+        total_steps += 1
+        if total_steps % target_update_freq == 0:
+            update_target_network()
 
         state = next_state
         total_reward += clipped_reward
@@ -265,20 +258,3 @@ for ep in range(eval_episodes):
     print(f"Evaluation episode {ep + 1}: return={total_reward:.2f}")
 
 print(f"\nAverage evaluation return over {eval_episodes} episodes: {np.mean(eval_scores):.2f}")
-def evaluate_policy(episodes: int = 5) -> float:
-    """Run a greedy evaluation without exploration."""
-    scores = []
-    for _ in range(episodes):
-        state, _ = eval_env.reset()
-        done = False
-        episode_reward = 0.0
-        while not done:
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
-            with torch.no_grad():
-                action = int(q_net(state_tensor).argmax(dim=1).item())
-            next_state, reward, terminated, truncated, _ = eval_env.step(action)
-            done = terminated or truncated
-            state = next_state
-            episode_reward += reward
-        scores.append(episode_reward)
-    return float(np.mean(scores))

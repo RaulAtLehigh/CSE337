@@ -3,17 +3,20 @@
 This script couples the reinforcement-learning environment to a MuJoCo scene so
 we can watch the steak sear in real time. The code is heavily commented because
 the viewer API requires several moving pieces (mjpython re-launch, color
-mapping, and overlay text updates).
+mapping, overlay text updates, and now optional learned-policy playback).
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import platform
 import shutil
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Callable, Sequence
 
 import numpy as np
 
@@ -26,6 +29,10 @@ except Exception as exc:  # pragma: no cover - fail fast with guidance
         "Install `mujoco` (and `mujoco-python-viewer`) inside your venv."
     ) from exc
 
+if TYPE_CHECKING:  # pragma: no cover - typing aid only
+    import torch
+
+from perfect_steak.experimentation.dqn_agent import QNetwork
 from perfect_steak.steak_env import SteakEnv, SteakEnvConfig
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
@@ -61,6 +68,37 @@ _TEMP_CMAP = LinearSegmentedColormap.from_list(
     "steak_temp",
     list(zip(_TEMP_CM_STOPS, _TEMP_COLORS[:, :3])),
 )
+
+ActionSelector = Callable[[np.ndarray], int]
+
+
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Visualize SteakEnv in MuJoCo with an optional trained policy."
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        help="Path to a `.pt` file produced by the experimentation sweep.",
+    )
+    parser.add_argument(
+        "--metadata",
+        type=Path,
+        help="Optional path to metadata JSON describing the checkpoint architecture.",
+    )
+    parser.add_argument(
+        "--hidden-layers",
+        type=int,
+        nargs="+",
+        help="Explicit hidden layer sizes if metadata is unavailable.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="Torch device string to use for inference (default: cpu).",
+    )
+    return parser.parse_args(argv)
 
 
 def _ensure_mjpython_on_macos() -> None:
@@ -220,11 +258,81 @@ def _update_heatmap(layer_temps: np.ndarray, image: np.ndarray) -> None:
     np.copyto(image, rgb)
 
 
-def main() -> None:
+def _load_metadata_hidden_layers(metadata_path: Path) -> list[int] | None:
+    try:
+        payload = json.loads(metadata_path.read_text())
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"Metadata file at {metadata_path} is not valid JSON."
+        ) from exc
+    hidden_layers = payload.get("hidden_layer_sizes")
+    if isinstance(hidden_layers, list) and all(isinstance(v, int) for v in hidden_layers):
+        return hidden_layers
+    return None
+
+
+def _infer_hidden_layers_from_state_dict(state_dict: dict[str, "torch.Tensor"]) -> list[int]:
+    """Recover hidden layer sizes from a sequential QNetwork state dict."""
+    linear_out_dims: list[int] = []
+    for key in sorted(state_dict.keys()):
+        if not key.endswith(".weight"):
+            continue
+        tensor = state_dict[key]
+        if not isinstance(tensor, torch.Tensor) or tensor.ndim != 2:
+            continue
+        linear_out_dims.append(int(tensor.shape[0]))
+    if not linear_out_dims:
+        return []
+    # All but the final linear correspond to hidden layers.
+    return linear_out_dims[:-1]
+
+
+def _build_learned_policy(
+    checkpoint_path: Path,
+    *,
+    metadata_path: Path | None,
+    hidden_override: Sequence[int] | None,
+    state_dim: int,
+    n_actions: int,
+    device: "torch.device",
+) -> ActionSelector:
+    import torch
+
+    state_dict = torch.load(checkpoint_path, map_location=device)
+    hidden_layers: list[int] | None = None
+    if hidden_override:
+        hidden_layers = [int(h) for h in hidden_override]
+    else:
+        candidate_meta = metadata_path or checkpoint_path.with_name("metadata.json")
+        if candidate_meta:
+            hidden_layers = _load_metadata_hidden_layers(candidate_meta) or None
+    if hidden_layers is None:
+        hidden_layers = _infer_hidden_layers_from_state_dict(state_dict)
+    q_net = QNetwork(state_dim, n_actions, hidden_layers).to(device)
+    missing, unexpected = q_net.load_state_dict(state_dict, strict=False)
+    if missing or unexpected:
+        raise SystemExit(
+            "Checkpoint does not match the inferred architecture. "
+            f"Missing keys: {missing}, unexpected keys: {unexpected}"
+        )
+    q_net.eval()
+
+    def select_action(obs: np.ndarray) -> int:
+        obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
+        with torch.no_grad():
+            return int(q_net(obs_tensor).argmax(dim=1).item())
+
+    return select_action
+
+
+def main(argv: Sequence[str] | None = None) -> None:
     """Entry point used by both python and mjpython launches."""
     if not SCENE_PATH.exists():
         raise SystemExit(f"Missing scene file at {SCENE_PATH}")
 
+    args = _parse_args(argv)
     _ensure_mjpython_on_macos()
 
     model = mujoco.MjModel.from_xml_path(str(SCENE_PATH))
@@ -240,6 +348,32 @@ def main() -> None:
 
     env = SteakEnv()
     obs, info = env.reset()
+    state_dim = (
+        env.observation_space.shape[0]
+        if getattr(env, "observation_space", None) is not None
+        else len(obs)
+    )
+    if getattr(env, "action_space", None) is not None:
+        n_actions = env.action_space.n  # type: ignore[assignment]
+    else:
+        n_actions = len(env.ACTIONS)
+    policy: ActionSelector | None = None
+    if args.checkpoint:
+        import torch
+
+        device = torch.device(args.device)
+        metadata_path = args.metadata
+        if metadata_path and not metadata_path.exists():
+            raise SystemExit(f"Metadata file {metadata_path} does not exist.")
+        policy = _build_learned_policy(
+            args.checkpoint,
+            metadata_path=metadata_path,
+            hidden_override=args.hidden_layers,
+            state_dim=state_dim,
+            n_actions=n_actions,
+            device=device,
+        )
+        print(f"[viewer] Loaded checkpoint {args.checkpoint} on {device}.")
     flip_state = {"performed": False}
     steak_body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "steak")
     heatmap_viewport = mujoco.MjrRect(0, 0, 0, 0)
@@ -251,7 +385,10 @@ def main() -> None:
         cam.cam.distance = 0.6
 
         while cam.is_running():
-            action = _heuristic_policy(obs, env, flip_state)
+            if policy is not None:
+                action = policy(obs)
+            else:
+                action = _heuristic_policy(obs, env, flip_state)
             obs, reward, terminated, truncated, step_info = env.step(action)
 
             model.geom_rgba[steak_bottom_geom_id] = _browning_value_to_rgba(

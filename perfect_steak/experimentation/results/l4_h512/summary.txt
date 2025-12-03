@@ -1,0 +1,20 @@
+Experiment ID: l4_h512
+Seed: 2025
+Hidden layers: 4 -> [512, 512, 512, 512]
+Learning rate: 0.0001
+Gamma: 0.99
+Epsilon schedule: start=1.0, min=0.02, decay=0.999
+Batch size: 128
+Replay buffer: 50000
+Target update frequency (steps): 500
+Evaluation interval (episodes): 250
+Total episodes: 5000
+Best eval return: 2.584 (recorded episode 3750)
+Time to reach optimal score (moving average >= 2.7): not reached
+Total training time (s): 1666.8
+Artifacts:
+  - metrics.json
+  - reward_curve.png
+  - actions_eval.json
+  - best_model.pt
+Notes: Four hidden layers (all 512 units).

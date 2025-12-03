@@ -1,0 +1,13 @@
+{
+  "experiment_id": "l1_h256",
+  "seed": 2025,
+  "hidden_layer_sizes": [
+    256
+  ],
+  "best_eval_score": 1.740173730828595,
+  "best_eval_episode": 5000,
+  "time_to_optimal_episode": null,
+  "total_training_seconds": 233.04980206489563,
+  "num_episodes": 5000,
+  "notes": "Single hidden layer (256 units)."
+}

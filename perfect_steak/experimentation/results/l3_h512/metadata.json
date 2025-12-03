@@ -1,0 +1,15 @@
+{
+  "experiment_id": "l3_h512",
+  "seed": 2025,
+  "hidden_layer_sizes": [
+    512,
+    512,
+    512
+  ],
+  "best_eval_score": 2.4629318240899134,
+  "best_eval_episode": 5000,
+  "time_to_optimal_episode": null,
+  "total_training_seconds": 1001.3268389701843,
+  "num_episodes": 5000,
+  "notes": "Three hidden layers (all 256 units)."
+}

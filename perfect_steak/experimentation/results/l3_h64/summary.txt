@@ -1,0 +1,20 @@
+Experiment ID: l3_h64
+Seed: 2025
+Hidden layers: 3 -> [64, 64, 64]
+Learning rate: 0.0001
+Gamma: 0.99
+Epsilon schedule: start=1.0, min=0.02, decay=0.999
+Batch size: 128
+Replay buffer: 50000
+Target update frequency (steps): 500
+Evaluation interval (episodes): 250
+Total episodes: 5000
+Best eval return: 1.472 (recorded episode 5000)
+Time to reach optimal score (moving average >= 2.7): not reached
+Total training time (s): 298.2
+Artifacts:
+  - metrics.json
+  - reward_curve.png
+  - actions_eval.json
+  - best_model.pt
+Notes: Three hidden layers (all 64 units).

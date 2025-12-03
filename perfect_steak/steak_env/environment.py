@@ -28,18 +28,16 @@ except Exception as exc:  # pragma: no cover - fallback if gymnasium missing
 
 @dataclass
 class SteakEnvConfig:
-    """Container for every tunable constant in the environment.
-
-    The defaults follow the narrative from the proposal 
-    (1.25 inch steak, medium-rare target). Additional coefficients such as
-    ``surface_coupling_bottom`` are provided so the thermal response can be
-    calibrated without rewriting the solver.
-    """
+    """Container for every tunable constant in the environment."""
 
     n_layers: int = 21  # Number of finite-difference layers through the steak.
     steak_thickness_m: float = 0.03175  # Total thickness (1.25 in) represented by the grid.
     thermal_diffusivity: float = 2.0e-7  # Thermal diffusivity (m^2/s) of thawed beef.
-    time_step_s: float = 1.0  # Simulation step in seconds.
+    
+    # CHANGED: Time step increased to 5.0s for frame skipping/faster learning.
+    # This reduces episode steps from 900 -> 180, making credit assignment easier.
+    time_step_s: float = 5.0  
+    
     initial_temp_c: float = 21.1  # Starting temperature of every layer (~70 °F).
     ambient_temp_c: float = 23.0  # Room temperature that the top surface exchanges with.
     heat_settings_c: Dict[str, float] = field(
@@ -58,7 +56,7 @@ class SteakEnvConfig:
     raw_core_c: float = 40.0  # Below this temperature the steak is considered raw.
     raw_penalty: float = 1.0  # Penalty for removing a raw steak.
     encourage_core_c: float = 30.0  # Threshold to discourage instant removal.
-    remove_reward_raw_penalty: float = 0.1  # Penalty when removing before encourage_core_c.
+    remove_reward_raw_penalty: float = 0.0  # No-op penalty (treat as wait).
     remove_reward_cooked_bonus: float = 0.2  # Bonus when removing after threshold + margin.
     heat_progress_reward: float = 0.001  # Reward per degree increase each step.
     maillard_progress_reward: float = 0.0005  # Reward per unit browning progress.
@@ -77,13 +75,7 @@ class SteakEnvConfig:
 
 
 class SteakEnv(gym.Env if gym else object):
-    """One-dimensional steak cooking environment with Maillard browning.
-
-    When Gymnasium is available, the class derives from ``gym.Env`` so it can
-    plug directly into standard RL tooling. Otherwise it still behaves like a
-    regular Python object offering ``reset``/``step`` but without registered
-    spaces.
-    """
+    """One-dimensional steak cooking environment with Maillard browning."""
 
     metadata = {"render_modes": []}
 
@@ -106,21 +98,22 @@ class SteakEnv(gym.Env if gym else object):
             * self.config.time_step_s
             / (self.dx**2)
         )
-        # Register discrete action space if Gym is available; otherwise keep a
-        # ``None`` sentinel so downstream callers can branch gracefully.
+        # Register discrete action space if Gym is available
         self.action_space = (
             spaces.Discrete(len(self.ACTIONS)) if spaces else None  # type: ignore[assignment]
         )
 
-        # Observations expose the key indicators available to the chef-like agent:
-        # core temperature, sear levels, current burner setting, and elapsed time.
+        # CHANGED: Removed 'time_elapsed' from observation.
+        # New Observables: [core_temp, brown_top, brown_bot, pan_temp, top_surf, bot_surf]
         high = np.array(
             [
                 250.0,  # core temperature upper bound
                 5.0,  # browning top
                 5.0,  # browning bottom
                 max(self.config.heat_settings_c.values()),
-                self.config.max_duration_s,
+                # REMOVED: self.config.max_duration_s,
+                250.0,  # top surface temp
+                250.0,  # bottom surface temp
             ],
             dtype=np.float32,
         )
@@ -130,25 +123,19 @@ class SteakEnv(gym.Env if gym else object):
             spaces.Box(low=low, high=high, dtype=np.float32) if spaces else None  # type: ignore[assignment]
         )
 
-        # Internal simulation buffers are initialized during ``reset``.
-        self.layer_temps: np.ndarray | None = None  # Discretized temperature profile (°C).
-        self.browning_top: float = 0.0  # Accumulated Maillard score for the top surface.
-        self.browning_bottom: float = 0.0  # Accumulated Maillard score for the bottom surface.
-        self.pan_temp: float = self.config.heat_settings_c["medium"]  # Active burner temperature.
-        self.time_elapsed: float = 0.0  # Total simulated seconds since the episode began.
-        self.cumulative_penalty: float = 0.0  # Aggregated time penalties used in final reward.
-        self.last_action: str = "wait"  # Human-readable name of the most recent action.
-        self._rng = np.random.default_rng()  # RNG instance used for sampling actions/seeds.
+        self.layer_temps: np.ndarray | None = None
+        self.browning_top: float = 0.0
+        self.browning_bottom: float = 0.0
+        self.pan_temp: float = self.config.heat_settings_c["medium"]
+        self.time_elapsed: float = 0.0
+        self.cumulative_penalty: float = 0.0
+        self.last_action: str = "wait"
+        self._rng = np.random.default_rng()
 
-    # -- core environment API -------------------------------------------------
     def reset(
         self, *, seed: int | None = None, options: dict | None = None
     ) -> Tuple[np.ndarray, dict]:
-        """Reinitialize temperature grid and brownness metrics.
-
-        Parameters mirror Gymnasium's extended signature so training code can
-        specify seeds or custom episode options.
-        """
+        """Reinitialize temperature grid and brownness metrics."""
         if seed is not None:
             self._rng = np.random.default_rng(seed)
         self.layer_temps = np.full(
@@ -172,13 +159,8 @@ class SteakEnv(gym.Env if gym else object):
 
     def step(
         self, action: int
-    ) -> Tuple[np.ndarray, float, bool, bool, dict]:  # obs, reward, terminated, truncated, info
-        """Advance the environment by one time step.
-
-        Actions mutate high-level controls (heat level, flip, remove) while the
-        solver handles conduction and browning. Rewards are only provided when
-        the steak is removed or the episode is forcibly truncated.
-        """
+    ) -> Tuple[np.ndarray, float, bool, bool, dict]:
+        """Advance the environment by one time step."""
         if action not in self.ACTIONS:
             raise ValueError(f"Invalid action {action}")
         assert self.layer_temps is not None, "reset() must be called before step()"
@@ -186,6 +168,7 @@ class SteakEnv(gym.Env if gym else object):
         self.last_action = self.ACTIONS[action]
         terminated = False
         truncated = False
+        reward_override = 0.0
 
         if action == 1:  # flip
             self._flip()
@@ -195,23 +178,20 @@ class SteakEnv(gym.Env if gym else object):
         elif action == 5:  # remove
             core_temp = float(self.layer_temps[len(self.layer_temps) // 2])
             if core_temp < 30.0 or self.time_elapsed < 30.0:
-                # Pretend remove is a no-op until it is meaningful.
-                reward = -self.config.remove_reward_raw_penalty
+                 reward_override = -self.config.remove_reward_raw_penalty
+            else:
+                terminated = True
+                reward = self._final_reward(removed=True)
                 obs = self._get_observation()
                 info = self._build_info(reward, terminated, truncated)
                 return obs, reward, terminated, truncated, info
-            terminated = True
-            reward = self._final_reward(removed=True)
-            obs = self._get_observation()
-            info = self._build_info(reward, terminated, truncated)
-            return obs, reward, terminated, truncated, info
 
-        # integrate dynamics
         prev_core = float(self.layer_temps[len(self.layer_temps) // 2])
         prev_browning = self.browning_top + self.browning_bottom
         self._apply_heat_step()
         curr_core = float(self.layer_temps[len(self.layer_temps) // 2])
         curr_browning = self.browning_top + self.browning_bottom
+        
         incremental_reward = 0.0
         if curr_core > prev_core:
             incremental_reward += self.config.heat_progress_reward * (curr_core - prev_core)
@@ -219,6 +199,7 @@ class SteakEnv(gym.Env if gym else object):
             incremental_reward += self.config.maillard_progress_reward * (curr_browning - prev_browning)
         if 40.0 <= curr_core <= 60.0:
             incremental_reward += 0.005
+        
         self.time_elapsed += self.config.time_step_s
         self.cumulative_penalty -= (
             self.config.time_penalty_per_second * self.config.time_step_s
@@ -228,23 +209,20 @@ class SteakEnv(gym.Env if gym else object):
             truncated = True
             terminated = True
 
-        reward = incremental_reward
-        if terminated:
-            reward = self._final_reward(removed=False)
+        reward = reward_override if reward_override != 0.0 else incremental_reward
+        if terminated and not reward_override:
+             reward = self._final_reward(removed=False)
 
         obs = self._get_observation()
         info = self._build_info(reward, terminated, truncated)
         return obs, reward, terminated, truncated, info
 
-    # -- helpers --------------------------------------------------------------
     def sample_action(self) -> int:
-        """Draw a random action regardless of Gymnasium availability."""
         if self.action_space is None:
             return self._rng.integers(0, len(self.ACTIONS))  # type: ignore[return-value]
         return int(self.action_space.sample())  # type: ignore[return-value]
 
     def _flip(self) -> None:
-        """Reverse temperature layers and swap browning scores."""
         assert self.layer_temps is not None
         self.layer_temps = self.layer_temps[::-1].copy()
         self.browning_top, self.browning_bottom = (
@@ -253,11 +231,8 @@ class SteakEnv(gym.Env if gym else object):
         )
 
     def _apply_heat_step(self) -> None:
-        """Update layer temperatures using a simple explicit scheme."""
         assert self.layer_temps is not None
         new_temps = self.layer_temps.copy()
-
-        # Interior finite-difference stencil (second derivative).
         for idx in range(1, self.config.n_layers - 1):
             laplacian = (
                 self.layer_temps[idx - 1]
@@ -265,45 +240,32 @@ class SteakEnv(gym.Env if gym else object):
                 + self.layer_temps[idx + 1]
             )
             new_temps[idx] += self.ratio * laplacian
-
-        # Boundary layer for the bottom surface (pan contact). We blend the
-        # conduction term with an empirical coupling factor to simulate direct
-        # heat transfer from the burner.
         bottom_exchange = (
             self.config.surface_coupling_bottom * (self.pan_temp - self.layer_temps[0])
             + (self.layer_temps[1] - self.layer_temps[0])
         )
         new_temps[0] += self.ratio * bottom_exchange
-
-        # Boundary for the top surface which exchanges heat with the ambient
-        # environment. The ambient cooling term is intentionally gentle so the
-        # steak does not behave as if it were exposed to freezing air.
         top_exchange = (
             self.config.ambient_cooling_top * (self.config.ambient_temp_c - self.layer_temps[-1])
             + self.config.surface_coupling_top * (self.layer_temps[-2] - self.layer_temps[-1])
         )
         new_temps[-1] += self.ratio * top_exchange
-
         self.layer_temps = new_temps
         self._update_browning()
 
     def _update_browning(self) -> None:
-        """Grow Maillard browning levels based on surface temperatures."""
         assert self.layer_temps is not None
-
         dt = self.config.time_step_s
         for surface, idx in (("bottom", 0), ("top", -1)):
             surface_temp = self.layer_temps[idx]
             excess = max(0.0, surface_temp - self.config.browning_threshold_c)
             if excess <= 0.0:
                 continue
-
             current = self.browning_bottom if surface == "bottom" else self.browning_top
             rate = self.config.browning_gain * (excess**2)
             if surface_temp >= self.config.browning_burn_c:
                 rate *= 1.4
             delta = rate * dt
-
             if surface == "bottom":
                 self.browning_bottom = min(
                     self.config.browning_cap, max(0.0, self.browning_bottom + delta)
@@ -314,13 +276,9 @@ class SteakEnv(gym.Env if gym else object):
                 )
 
     def _final_reward(self, *, removed: bool) -> float:
-        """Evaluate the steak when the agent decides to finish cooking."""
         assert self.layer_temps is not None
         core_temp = float(self.layer_temps[len(self.layer_temps) // 2])
         avg_brown = (self.browning_top + self.browning_bottom) / 2.0
-
-        # Doneness and sear terms rely on Gaussian-shaped preferences centered
-        # around the ideal medium-rare temperature and a target brownness level.
         doneness = math.exp(
             -((core_temp - self.config.core_target_c) ** 2)
             / (2 * self.config.core_sigma**2)
@@ -329,15 +287,11 @@ class SteakEnv(gym.Env if gym else object):
             -((avg_brown - self.config.browning_target) ** 2)
             / (2 * self.config.browning_sigma**2)
         )
-
         reward = (
                 self.config.doneness_weight * doneness
                 + self.config.sear_weight * sear
                 + self.cumulative_penalty
         )
-
-        # Heavy penalty when the steak overcooks or the browning exceeds the
-        # maximum recommended cap. This encodes "burnt steak" outcomes.
         burn_limit = self.config.browning_target + 50.0
         burn = core_temp >= self.config.burn_core_c or (
             self.browning_top > burn_limit or self.browning_bottom > burn_limit
@@ -351,33 +305,36 @@ class SteakEnv(gym.Env if gym else object):
         elif core_temp >= self.config.encourage_core_c + 10.0:
             reward += self.config.remove_reward_cooked_bonus
         if not removed:
-            # If truncated, treat as suboptimal finish.
             reward -= 0.5
         return reward
 
     def _get_observation(self) -> np.ndarray:
-        """Construct the observation vector exposed to the agent."""
         assert self.layer_temps is not None
         core_temp = float(self.layer_temps[len(self.layer_temps) // 2])
+        top_surf = float(self.layer_temps[-1])
+        bot_surf = float(self.layer_temps[0])
+        
         obs_raw = np.array(
             [
                 core_temp,
                 self.browning_top,
                 self.browning_bottom,
                 self.pan_temp,
-                self.time_elapsed,
+                # REMOVED: self.time_elapsed,
+                top_surf,
+                bot_surf,
             ],
             dtype=np.float32,
         )
-        # Normalize features to roughly 0-1 to help learning stability.
+        # Normalize features to roughly 0-1. Adjusted for missing time field.
         normalization_bounds = np.array(
-            [250.0, 150.0, 150.0, 250.0, self.config.max_duration_s], dtype=np.float32
+            [250.0, 150.0, 150.0, 250.0, 250.0, 250.0],
+            dtype=np.float32
         )
         obs = np.clip(obs_raw / normalization_bounds, 0.0, 1.0)
         return obs
 
     def _build_info(self, reward: float, terminated: bool, truncated: bool) -> dict:
-        """Gather diagnostic information for logging or visualization."""
         assert self.layer_temps is not None
         info = {
             "core_temp_c": float(self.layer_temps[len(self.layer_temps) // 2]),
@@ -394,27 +351,3 @@ class SteakEnv(gym.Env if gym else object):
             "layer_temps": self.layer_temps.copy(),
         }
         return info
-
-
-def _demo_rollout(steps: int = 120) -> None:
-    """Standalone smoke test when the module is executed directly."""
-    env = SteakEnv()
-    obs, info = env.reset()
-    print("Initial obs:", obs)
-    print("Initial info:", {k: round(v, 2) if isinstance(v, float) else v for k, v in info.items()})
-    for step in range(steps):
-        action = env.sample_action()
-        obs, reward, terminated, truncated, info = env.step(action)
-        if (step + 1) % 10 == 0 or terminated:
-            print(
-                f"Step {step+1:03d} | action={info['last_action']:<10} | "
-                f"core={info['core_temp_c']:.1f}°C | "
-                f"brown(top/bot)=({info['browning_top']:.2f}, {info['browning_bottom']:.2f}) | "
-                f"reward={reward:.3f}"
-            )
-        if terminated:
-            break
-
-
-if __name__ == "__main__":
-    _demo_rollout()
